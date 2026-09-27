@@ -2,6 +2,8 @@ name: Обновление кинозала New TV
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
   schedule:
     - cron: "17 */6 * * *"
 
@@ -47,22 +49,19 @@ jobs:
                   continue
 
               url = lines[i + 1].strip() if i + 1 < len(lines) else ""
-              group = ""
-              title = line
-              for part in line.split(",", 1)[0].split():
-                  pass
               marker = 'group-title="'
+              group = ""
               if marker in line:
                   group = line.split(marker, 1)[1].split('"', 1)[0]
+
               title_upper = line.upper()
               group_upper = group.upper()
 
               if group in allowed_groups and not any(term in title_upper or term in group_upper for term in blocked_terms):
                   new_line = line
-                  if marker in new_line:
-                      before, rest = new_line.split(marker, 1)
-                      old_group, after = rest.split('"', 1)
-                      new_line = before + marker + allowed_groups[group] + '"' + after
+                  before, rest = new_line.split(marker, 1)
+                  old_group, after = rest.split('"', 1)
+                  new_line = before + marker + allowed_groups[group] + '"' + after
                   result.extend([new_line, url])
                   kept += 1
               i += 2
