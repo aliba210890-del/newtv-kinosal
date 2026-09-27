@@ -33,22 +33,27 @@ jobs:
               "Films_4k": "Кинозал New TV — 4K",
               "4K": "Кинозал New TV — 4K",
           }
+
           blocked_terms = [
-              "INFO", "ИНФОРМАЦИЯ", "ПОСМОТРИ", "ЖИЗНЬ НА НАШЕЙ ПЛАНЕТЕ",
-              "КАК ЭТО РАБОТАЕТ", "КАК ЭТО СДЕЛАНО", "НАШИ МУЛЬТФИЛЬМЫ",
-              "РАЗРУШИТЕЛИ ЛЕГЕНД", "ТОМ И ДЖЕРРИ", "МУЛЬТ"
+              "INFO", "ИНФОРМАЦИЯ", "ПОСМОТРИ",
+              "ЖИЗНЬ НА НАШЕЙ ПЛАНЕТЕ", "КАК ЭТО РАБОТАЕТ",
+              "КАК ЭТО СДЕЛАНО", "НАШИ МУЛЬТФИЛЬМЫ",
+              "РАЗРУШИТЕЛИ ЛЕГЕНД", "ТОМ И ДЖЕРРИ",
+              "МУЛЬТФИЛЬМ", "МУЛЬТ", "АНИМЕ", "АНИМАЦ",
+              "CARTOON", "ANIME", "ANIMATION"
           ]
 
           result = ["#EXTM3U"]
           kept = 0
           i = 0
+
           while i < len(lines):
               line = lines[i].strip()
+
               if not line.startswith("#EXTINF:"):
                   i += 1
                   continue
 
-              url = lines[i + 1].strip() if i + 1 < len(lines) else ""
               marker = 'group-title="'
               group = ""
               if marker in line:
@@ -57,14 +62,31 @@ jobs:
               title_upper = line.upper()
               group_upper = group.upper()
 
-              if group in allowed_groups and not any(term in title_upper or term in group_upper for term in blocked_terms):
-                  new_line = line
-                  before, rest = new_line.split(marker, 1)
+              # Собираем всю запись: EXTINF + дополнительные #EXT... строки + URL.
+              block = [line]
+              j = i + 1
+              while j < len(lines) and lines[j].strip().startswith("#"):
+                  block.append(lines[j].strip())
+                  j += 1
+
+              url = lines[j].strip() if j < len(lines) else ""
+
+              is_movie_group = group in allowed_groups
+              is_blocked = any(term in title_upper or term in group_upper for term in blocked_terms)
+              has_url = bool(url) and not url.startswith("#")
+
+              if is_movie_group and not is_blocked and has_url:
+                  new_extinf = line
+                  before, rest = new_extinf.split(marker, 1)
                   old_group, after = rest.split('"', 1)
-                  new_line = before + marker + allowed_groups[group] + '"' + after
-                  result.extend([new_line, url])
+                  new_extinf = before + marker + allowed_groups[group] + '"' + after
+                  block[0] = new_extinf
+
+                  result.extend(block)
+                  result.append(url)
                   kept += 1
-              i += 2
+
+              i = j + 1
 
           if kept == 0:
               raise SystemExit("Не найдено ни одного фильма; исходный файл не будет перезаписан.")
