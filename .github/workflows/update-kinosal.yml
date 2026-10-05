@@ -113,3 +113,5 @@ jobs:
           git add kinosal-new-tv.m3u
           git diff --cached --quiet || git commit -m "Автоматическое обновление кинозала"
           git push
+
+# ClouDDy compatibility: keep VLC, EXTHTTP and inline User-Agent headers.
