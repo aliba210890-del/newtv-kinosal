@@ -81,6 +81,19 @@ jobs:
                   before, rest = line.split(marker, 1)
                   old_group, after = rest.split('"', 1)
                   block[0] = before + marker + allowed_groups[group] + '"' + after
+
+                  # Preserve the source User-Agent in formats understood by more players.
+                  ua = ""
+                  for b in block[1:]:
+                      if b.lower().startswith("#extvlcopt:http-user-agent="):
+                          ua = b.split("=", 1)[1].strip().strip('"')
+                          break
+
+                  if ua:
+                      safe_ua = ua.replace("\\", "\\\\").replace('"', '\\"')
+                      block.insert(1, f'#EXTHTTP:{{"User-Agent":"{safe_ua}"}}')
+                      url = url + "|User-Agent=" + urllib.parse.quote(ua, safe="")
+
                   result.extend(block)
                   result.append(url)
                   kept += 1
