@@ -21,6 +21,7 @@ jobs:
         shell: python
         run: |
           import urllib.request
+          import urllib.parse
           from pathlib import Path
 
           source_url = "https://raw.githubusercontent.com/Dimonovich/TV/Dimonovich/FREE/FILMS.m3u"
@@ -47,6 +48,7 @@ jobs:
           ]
 
           result = ["#EXTM3U"]
+          cloudy_result = ["#EXTM3U"]
           kept = 0
           i = 0
 
@@ -82,7 +84,6 @@ jobs:
                   old_group, after = rest.split('"', 1)
                   block[0] = before + marker + allowed_groups[group] + '"' + after
 
-                  # Preserve the source User-Agent in formats understood by more players.
                   ua = ""
                   for b in block[1:]:
                       if b.lower().startswith("#extvlcopt:http-user-agent="):
@@ -92,26 +93,34 @@ jobs:
                   if ua:
                       safe_ua = ua.replace("\\", "\\\\").replace('"', '\\"')
                       block.insert(1, f'#EXTHTTP:{{"User-Agent":"{safe_ua}"}}')
-                      url = url + "|User-Agent=" + urllib.parse.quote(ua, safe="")
+                      url_with_ua = url + "|User-Agent=" + urllib.parse.quote(ua, safe="")
+                  else:
+                      url_with_ua = url
 
                   result.extend(block)
-                  result.append(url)
+                  result.append(url_with_ua)
+
+                  # Separate simplified playlist for ClouDDy:
+                  # only EXTINF + stream URL, with UA in the URL itself.
+                  cloudy_result.append(block[0])
+                  cloudy_result.append(url_with_ua)
                   kept += 1
 
               i = j + 1
 
           if kept == 0:
-              raise SystemExit("Не найдено ни одного фильма; исходный файл не будет перезаписан.")
+              raise SystemExit("Не найдено ни одного фильма; исходные файлы не будут перезаписаны.")
 
           Path("kinosal-new-tv.m3u").write_text("\n".join(result) + "\n", encoding="utf-8")
+          Path("kinosal-cloudy.m3u").write_text("\n".join(cloudy_result) + "\n", encoding="utf-8")
           print(f"Сохранено фильмов: {kept}")
 
       - name: Сохранить обновлённый плейлист
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add kinosal-new-tv.m3u
-          git diff --cached --quiet || git commit -m "Автоматическое обновление кинозала"
+          git add kinosal-new-tv.m3u kinosal-cloudy.m3u
+          git diff --cached --quiet || git commit -m "Обновление кинозала и версии для ClouDDy"
           git push
 
-# ClouDDy compatibility: keep VLC, EXTHTTP and inline User-Agent headers.
+# ClouDDy: simplified playlist is generated separately.
