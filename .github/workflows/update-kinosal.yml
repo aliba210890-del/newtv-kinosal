@@ -29,11 +29,29 @@ jobs:
           lines = raw.splitlines()
 
           allowed_groups = {
-              "Фильмы": "Кинозал New TV — Фильмы",
-              "Новинки кино": "Кинозал New TV — Новинки",
-              "Films_4k": "Кинозал New TV — 4K",
-              "4K": "Кинозал New TV — 4K",
+              "Фильмы": True,
+              "Новинки кино": True,
+              "Films_4k": True,
+              "4K": True,
           }
+
+          genre_rules = [
+              ("Мультфильмы", ["МУЛЬТ", "АНИМЕ", "ANIME", "CARTOON", "ANIMATION"]),
+              ("Ужасы", ["УЖАС", "HORROR"]),
+              ("Фантастика", ["ФАНТАСТ", "SCI-FI", "SCI FI", "SPACE", "КОСМОС"]),
+              ("Фэнтези", ["ФЭНТЕЗИ", "FANTASY", "ВОЛШЕБ", "МАГИЯ", "ДРАКОН"]),
+              ("Боевики", ["БОЕВИК", "ACTION", "АГЕНТ", "СПЕЦНАЗ", "ПОЛИЦ", "НАЕМНИК", "НАЁМНИК"]),
+              ("Триллеры", ["ТРИЛЛЕР", "THRILLER", "МАНЬЯК", "ПОХИЩ", "ЗАЛОЖНИК"]),
+              ("Комедии", ["КОМЕД", "COMEDY", "ЮМОР"]),
+              ("Мелодрамы", ["МЕЛОДРАМ", "РОМАНТИК", "ROMANCE", "LOVE", "ЛЮБОВ"]),
+              ("Драмы", ["ДРАМА", "DRAMA"]),
+              ("Криминал", ["КРИМИНАЛ", "CRIME", "БАНДИТ", "МАФИЯ", "ГАНГСТЕР", "ДЕТЕКТИВ"]),
+              ("Приключения", ["ПРИКЛЮЧ", "ADVENTURE", "ОСТРОВ", "СОКРОВИЩ"]),
+              ("Военные", ["ВОЕНН", "WAR", "СОЛДАТ", "АРМИЯ", "ВОЙНА", "ФРОНТ"]),
+              ("История", ["ИСТОРИЧ", "HISTORY", "ИМПЕРАТОР", "КОРОЛЬ", "КОРОЛЕВА", "ЦАРЬ"]),
+              ("Семейные", ["СЕМЕЙН", "FAMILY", "ДЕТИ"]),
+              ("Документальные", ["ДОКУМЕНТ", "DOCUMENTARY", "DOCUMENTAL"]),
+          ]
 
           blocked_terms = [
               "INFO", "ИНФОРМАЦИЯ", "ПОСМОТРИ",
@@ -82,7 +100,16 @@ jobs:
               if is_movie_group and not is_blocked and has_url:
                   before, rest = line.split(marker, 1)
                   old_group, after = rest.split('"', 1)
-                  block[0] = before + marker + allowed_groups[group] + '"' + after
+
+                  title_for_genre = after.split(",", 1)[1].strip() if "," in after else old_group
+                  title_upper_for_genre = title_for_genre.upper()
+                  detected_genre = "Фильмы"
+                  for genre, keywords in genre_rules:
+                      if any(keyword.upper() in title_upper_for_genre for keyword in keywords):
+                          detected_genre = genre
+                          break
+
+                  block[0] = before + marker + detected_genre + '"' + after
 
                   ua = ""
                   for b in block[1:]:
