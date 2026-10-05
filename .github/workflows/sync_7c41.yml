@@ -1,0 +1,153 @@
+name: Синхронизация каталога
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 */6 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  update-playlist:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Получить репозиторий
+        uses: actions/checkout@v4
+
+      - name: Скачать и отфильтровать M3U
+        shell: python
+        run: |
+          import urllib.request
+          import urllib.parse
+          from pathlib import Path
+
+          source_url = "https://raw.githubusercontent.com/Dimonovich/TV/Dimonovich/FREE/FILMS.m3u"
+          raw = urllib.request.urlopen(source_url, timeout=60).read().decode("utf-8", errors="replace")
+          lines = raw.splitlines()
+
+          allowed_groups = {
+              "Фильмы": True,
+              "Новинки кино": True,
+              "Films_4k": True,
+              "4K": True,
+          }
+
+          genre_rules = [
+              ("Мультфильмы", ["МУЛЬТ", "АНИМЕ", "ANIME", "CARTOON", "ANIMATION"]),
+              ("Ужасы", ["УЖАС", "HORROR"]),
+              ("Фантастика", ["ФАНТАСТ", "SCI-FI", "SCI FI", "SPACE", "КОСМОС"]),
+              ("Фэнтези", ["ФЭНТЕЗИ", "FANTASY", "ВОЛШЕБ", "МАГИЯ", "ДРАКОН"]),
+              ("Боевики", ["БОЕВИК", "ACTION", "АГЕНТ", "СПЕЦНАЗ", "ПОЛИЦ", "НАЕМНИК", "НАЁМНИК"]),
+              ("Триллеры", ["ТРИЛЛЕР", "THRILLER", "МАНЬЯК", "ПОХИЩ", "ЗАЛОЖНИК"]),
+              ("Комедии", ["КОМЕД", "COMEDY", "ЮМОР"]),
+              ("Мелодрамы", ["МЕЛОДРАМ", "РОМАНТИК", "ROMANCE", "LOVE", "ЛЮБОВ"]),
+              ("Драмы", ["ДРАМА", "DRAMA"]),
+              ("Криминал", ["КРИМИНАЛ", "CRIME", "БАНДИТ", "МАФИЯ", "ГАНГСТЕР", "ДЕТЕКТИВ"]),
+              ("Приключения", ["ПРИКЛЮЧ", "ADVENTURE", "ОСТРОВ", "СОКРОВИЩ"]),
+              ("Военные", ["ВОЕНН", "WAR", "СОЛДАТ", "АРМИЯ", "ВОЙНА", "ФРОНТ"]),
+              ("История", ["ИСТОРИЧ", "HISTORY", "ИМПЕРАТОР", "КОРОЛЬ", "КОРОЛЕВА", "ЦАРЬ"]),
+              ("Семейные", ["СЕМЕЙН", "FAMILY", "ДЕТИ"]),
+              ("Документальные", ["ДОКУМЕНТ", "DOCUMENTARY", "DOCUMENTAL"]),
+          ]
+
+          blocked_terms = [
+              "INFO", "ИНФОРМАЦИЯ", "ПОСМОТРИ",
+              "ЖИЗНЬ НА НАШЕЙ ПЛАНЕТЕ", "КАК ЭТО РАБОТАЕТ",
+              "КАК ЭТО СДЕЛАНО", "НАШИ МУЛЬТФИЛЬМЫ",
+              "РАЗРУШИТЕЛИ ЛЕГЕНД", "ТОМ И ДЖЕРРИ",
+              "МУЛЬТФИЛЬМ", "МУЛЬТ", "АНИМЕ", "АНИМАЦ",
+              "CARTOON", "ANIME", "ANIMATION",
+              "ЩЕНЯЧИЙ ПАТРУЛЬ", "ДИНОФИЛЬМ", "МАЛЬЧИК И ЛИС",
+              "ХОДЯЧИЙ ЗАМОК", "УЧЕНИК ЧУДОВИЩА", "ЦАРСТВО ПАДАЛЬЩИКОВ",
+              "ФЕИ:", "ФЕЯ:", "ТОМ И ДЖЕРРИ"
+          ]
+
+          result = ["#EXTM3U"]
+          cloudy_result = ["#EXTM3U"]
+          kept = 0
+          i = 0
+
+          while i < len(lines):
+              line = lines[i].strip()
+
+              if not line.startswith("#EXTINF:"):
+                  i += 1
+                  continue
+
+              marker = 'group-title="'
+              group = ""
+              if marker in line:
+                  group = line.split(marker, 1)[1].split('"', 1)[0]
+
+              title_upper = line.upper()
+              group_upper = group.upper()
+
+              block = [line]
+              j = i + 1
+              while j < len(lines) and lines[j].strip().startswith("#"):
+                  block.append(lines[j].strip())
+                  j += 1
+
+              url = lines[j].strip() if j < len(lines) else ""
+
+              is_movie_group = group in allowed_groups
+              is_blocked = any(term in title_upper or term in group_upper for term in blocked_terms)
+              has_url = bool(url) and not url.startswith("#")
+
+              if is_movie_group and not is_blocked and has_url:
+                  before, rest = line.split(marker, 1)
+                  old_group, after = rest.split('"', 1)
+
+                  title_for_genre = after.split(",", 1)[1].strip() if "," in after else old_group
+                  title_upper_for_genre = title_for_genre.upper()
+                  detected_genre = "Фильмы"
+                  for genre, keywords in genre_rules:
+                      if any(keyword.upper() in title_upper_for_genre for keyword in keywords):
+                          detected_genre = genre
+                          break
+
+                  block[0] = before + marker + detected_genre + '"' + after
+
+                  ua = ""
+                  for b in block[1:]:
+                      if b.lower().startswith("#extvlcopt:http-user-agent="):
+                          ua = b.split("=", 1)[1].strip().strip('"')
+                          break
+
+                  if ua:
+                      safe_ua = ua.replace("\\", "\\\\").replace('"', '\\"')
+                      block.insert(1, f'#EXTHTTP:{{"User-Agent":"{safe_ua}"}}')
+                      url_with_ua = url + "|User-Agent=" + urllib.parse.quote(ua, safe="")
+                  else:
+                      url_with_ua = url
+
+                  result.extend(block)
+                  result.append(url_with_ua)
+
+                  # Separate simplified playlist for ClouDDy:
+                  # only EXTINF + stream URL, with UA in the URL itself.
+                  cloudy_result.append(block[0])
+                  cloudy_result.append(url_with_ua)
+                  kept += 1
+
+              i = j + 1
+
+          if kept == 0:
+              raise SystemExit("Не найдено ни одного фильма; исходные файлы не будут перезаписаны.")
+
+          Path("data_7f3a.m3u").write_text("\n".join(result) + "\n", encoding="utf-8")
+          Path("index_91c2.m3u").write_text("\n".join(cloudy_result) + "\n", encoding="utf-8")
+          print(f"Сохранено фильмов: {kept}")
+
+      - name: Сохранить обновлённый плейлист
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data_7f3a.m3u index_91c2.m3u
+          git diff --cached --quiet || git commit -m "Синхронизация каталога"
+          git push
+
+# ClouDDy: simplified playlist is generated separately.
