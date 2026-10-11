@@ -1,4 +1,4 @@
-name: Синхронизация каталога
+name: Обновление единого кинозала
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ jobs:
       - name: Получить репозиторий
         uses: actions/checkout@v4
 
-      - name: Скачать и отфильтровать M3U
+      - name: Скачать единый список фильмов
         shell: python
         run: |
           import urllib.request
@@ -25,65 +25,31 @@ jobs:
           from pathlib import Path
 
           source_url = "https://raw.githubusercontent.com/Dimonovich/TV/Dimonovich/FREE/FILMS.m3u"
-          raw = urllib.request.urlopen(source_url, timeout=60).read().decode("utf-8", errors="replace")
+          request = urllib.request.Request(
+              source_url,
+              headers={"User-Agent": "NewTV-Kinosal-Sync/1.0"}
+          )
+          raw = urllib.request.urlopen(request, timeout=90).read().decode("utf-8-sig", errors="replace")
           lines = raw.splitlines()
 
-          allowed_groups = {
-              "Фильмы": True,
-              "Новинки кино": True,
-              "Films_4k": True,
-              "4K": True,
-          }
-
-          genre_rules = [
-              ("Мультфильмы", ["МУЛЬТ", "АНИМЕ", "ANIME", "CARTOON", "ANIMATION"]),
-              ("Ужасы", ["УЖАС", "HORROR"]),
-              ("Фантастика", ["ФАНТАСТ", "SCI-FI", "SCI FI", "SPACE", "КОСМОС"]),
-              ("Фэнтези", ["ФЭНТЕЗИ", "FANTASY", "ВОЛШЕБ", "МАГИЯ", "ДРАКОН"]),
-              ("Боевики", ["БОЕВИК", "ACTION", "АГЕНТ", "СПЕЦНАЗ", "ПОЛИЦ", "НАЕМНИК", "НАЁМНИК"]),
-              ("Триллеры", ["ТРИЛЛЕР", "THRILLER", "МАНЬЯК", "ПОХИЩ", "ЗАЛОЖНИК"]),
-              ("Комедии", ["КОМЕД", "COMEDY", "ЮМОР"]),
-              ("Мелодрамы", ["МЕЛОДРАМ", "РОМАНТИК", "ROMANCE", "LOVE", "ЛЮБОВ"]),
-              ("Драмы", ["ДРАМА", "DRAMA"]),
-              ("Криминал", ["КРИМИНАЛ", "CRIME", "БАНДИТ", "МАФИЯ", "ГАНГСТЕР", "ДЕТЕКТИВ"]),
-              ("Приключения", ["ПРИКЛЮЧ", "ADVENTURE", "ОСТРОВ", "СОКРОВИЩ"]),
-              ("Военные", ["ВОЕНН", "WAR", "СОЛДАТ", "АРМИЯ", "ВОЙНА", "ФРОНТ"]),
-              ("История", ["ИСТОРИЧ", "HISTORY", "ИМПЕРАТОР", "КОРОЛЬ", "КОРОЛЕВА", "ЦАРЬ"]),
-              ("Семейные", ["СЕМЕЙН", "FAMILY", "ДЕТИ"]),
-              ("Документальные", ["ДОКУМЕНТ", "DOCUMENTARY", "DOCUMENTAL"]),
-          ]
-
-          blocked_terms = [
-              "INFO", "ИНФОРМАЦИЯ", "ПОСМОТРИ",
-              "ЖИЗНЬ НА НАШЕЙ ПЛАНЕТЕ", "КАК ЭТО РАБОТАЕТ",
-              "КАК ЭТО СДЕЛАНО", "НАШИ МУЛЬТФИЛЬМЫ",
-              "РАЗРУШИТЕЛИ ЛЕГЕНД", "ТОМ И ДЖЕРРИ",
-              "МУЛЬТФИЛЬМ", "МУЛЬТ", "АНИМЕ", "АНИМАЦ",
-              "CARTOON", "ANIME", "ANIMATION",
-              "ЩЕНЯЧИЙ ПАТРУЛЬ", "ДИНОФИЛЬМ", "МАЛЬЧИК И ЛИС",
-              "ХОДЯЧИЙ ЗАМОК", "УЧЕНИК ЧУДОВИЩА", "ЦАРСТВО ПАДАЛЬЩИКОВ",
-              "ФЕИ:", "ФЕЯ:", "ТОМ И ДЖЕРРИ"
-          ]
-
           result = ["#EXTM3U"]
-          cloudy_result = ["#EXTM3U"]
           kept = 0
           i = 0
 
+          # Источник уже является списком фильмов. Все найденные записи
+          # помещаются в одну категорию «Фильмы», без жанров и подборок.
+          blocked_markers = (
+              "group-title=\"INFO\"",
+              "group-title=\"ПОСМОТРИ",
+              "group-title=\"ANDROID TV",
+              "group-title=\"FREE TV",
+          )
+
           while i < len(lines):
               line = lines[i].strip()
-
               if not line.startswith("#EXTINF:"):
                   i += 1
                   continue
-
-              marker = 'group-title="'
-              group = ""
-              if marker in line:
-                  group = line.split(marker, 1)[1].split('"', 1)[0]
-
-              title_upper = line.upper()
-              group_upper = group.upper()
 
               block = [line]
               j = i + 1
@@ -92,62 +58,57 @@ jobs:
                   j += 1
 
               url = lines[j].strip() if j < len(lines) else ""
-
-              is_movie_group = group in allowed_groups
-              is_blocked = any(term in title_upper or term in group_upper for term in blocked_terms)
+              title_line = line
+              upper = title_line.upper()
+              is_promo = (
+                  any(marker in title_line.upper() for marker in blocked_markers)
+                  or "ПОСМОТРИ!!!" in upper
+                  or "ANDROID TV + FREE TV" in upper
+              )
               has_url = bool(url) and not url.startswith("#")
 
-              if is_movie_group and not is_blocked and has_url:
-                  before, rest = line.split(marker, 1)
-                  old_group, after = rest.split('"', 1)
+              if has_url and not is_promo:
+                  # Удаляем старое group-title и назначаем единственную группу.
+                  import re
+                  if 'group-title="' in line:
+                      line = re.sub(r'group-title="[^"]*"', 'group-title="Фильмы"', line, count=1)
+                  else:
+                      line = line.replace("#EXTINF:", '#EXTINF:-1 group-title="Фильмы" ', 1)
 
-                  title_for_genre = after.split(",", 1)[1].strip() if "," in after else old_group
-                  title_upper_for_genre = title_for_genre.upper()
-                  detected_genre = "Фильмы"
-                  for genre, keywords in genre_rules:
-                      if any(keyword.upper() in title_upper_for_genre for keyword in keywords):
-                          detected_genre = genre
-                          break
-
-                  block[0] = before + marker + detected_genre + '"' + after
+                  block[0] = line
 
                   ua = ""
-                  for b in block[1:]:
-                      if b.lower().startswith("#extvlcopt:http-user-agent="):
-                          ua = b.split("=", 1)[1].strip().strip('"')
+                  for item in block[1:]:
+                      if item.lower().startswith("#extvlcopt:http-user-agent="):
+                          ua = item.split("=", 1)[1].strip().strip('"')
                           break
 
-                  if ua:
-                      safe_ua = ua.replace("\\", "\\\\").replace('"', '\\"')
-                      block.insert(1, f'#EXTHTTP:{{"User-Agent":"{safe_ua}"}}')
-                      url_with_ua = url + "|User-Agent=" + urllib.parse.quote(ua, safe="")
-                  else:
-                      url_with_ua = url
+                  # Для совместимости с разными IPTV-плеерами сохраняем User-Agent в URL.
+                  if ua and "|User-Agent=" not in url:
+                      url = url + "|User-Agent=" + urllib.parse.quote(ua, safe="")
 
-                  result.extend(block)
-                  result.append(url_with_ua)
-
-                  # Separate simplified playlist for ClouDDy:
-                  # only EXTINF + stream URL, with UA in the URL itself.
-                  cloudy_result.append(block[0])
-                  cloudy_result.append(url_with_ua)
+                  # ClouDDy-плейлист содержит только заголовок фильма и ссылку.
+                  result.append(block[0])
+                  result.append(url)
                   kept += 1
 
               i = j + 1
 
           if kept == 0:
-              raise SystemExit("Не найдено ни одного фильма; исходные файлы не будут перезаписаны.")
+              raise SystemExit("Источник не вернул фильмы; существующие плейлисты не изменены.")
 
-          Path("data_7f3a.m3u").write_text("\n".join(result) + "\n", encoding="utf-8")
-          Path("index_91c2.m3u").write_text("\n".join(cloudy_result) + "\n", encoding="utf-8")
-          print(f"Сохранено фильмов: {kept}")
+          playlist = "\n".join(result) + "\n"
 
-      - name: Сохранить обновлённый плейлист
+          # Все старые адреса плейлистов оставляем рабочими, но содержимое единое.
+          for filename in ("kinosal-cloudy.m3u", "index_91c2.m3u", "data_7f3a.m3u"):
+              Path(filename).write_text(playlist, encoding="utf-8")
+
+          print(f"Единый каталог обновлён. Фильмов: {kept}")
+
+      - name: Сохранить обновлённые плейлисты
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data_7f3a.m3u index_91c2.m3u
-          git diff --cached --quiet || git commit -m "Синхронизация каталога"
+          git add kinosal-cloudy.m3u index_91c2.m3u data_7f3a.m3u
+          git diff --cached --quiet || git commit -m "Единый кинозал: только фильмы"
           git push
-
-# ClouDDy: simplified playlist is generated separately.
